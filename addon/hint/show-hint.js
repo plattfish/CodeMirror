@@ -88,8 +88,9 @@
       return this.cm.state.completionActive == this;
     },
 
-    pick: function (data, i) {
-      var completion = data.list[i];
+    pick: function (data) {
+      console.log('PICK 1');
+      var completion = data.list[data.selectedHint];
       if (completion.hint) completion.hint(this.cm, data, completion);
       else this.cm.replaceRange(getText(completion), completion.from || data.from,
         completion.to || data.to, "complete");
@@ -138,7 +139,8 @@
       if (this.widget) this.widget.close();
       if (data && data.list.length) {
         if (picked && data.list.length == 1) {
-          this.pick(data, 0);
+          data.selectedHint = 0;
+          this.pick(data);
         } else {
           this.widget = new Widget(this, data);
           CodeMirror.signal(data, "shown");
@@ -224,8 +226,9 @@
 
   function Widget(completion, data) {
     this.completion = completion;
-    this.data = data;
+    this.data = this.rootData = data;
     this.picked = false;
+    this.depth = 0;
     var widget = this, cm = completion.cm;
 
     var container = document.createElement("div");
@@ -233,12 +236,12 @@
     var hints = this.hints = document.createElement("ul");
     container.appendChild(hints);
     hints.className = "CodeMirror-hints";
-    this.selectedHint = data.selectedHint || 0;
+    this.data.selectedHint = data.selectedHint || 0;
 
     var completions = data.list;
     for (var i = 0; i < completions.length; ++i) {
       var elt = hints.appendChild(document.createElement("li")), cur = completions[i];
-      var className = HINT_ELEMENT_CLASS + (i != this.selectedHint ? "" : " " + ACTIVE_HINT_ELEMENT_CLASS);
+      var className = HINT_ELEMENT_CLASS + (i != this.data.selectedHint ? "" : " " + ACTIVE_HINT_ELEMENT_CLASS);
       if (cur.className != null) className = cur.className + " " + className;
       elt.className = className;
       if (cur.render) cur.render(elt, data, cur);
@@ -285,7 +288,7 @@
 
     cm.addKeyMap(this.keyMap = buildKeyMap(completion, {
       moveFocus: function (n, avoidWrap) {
-        widget.changeActive(widget.selectedHint + n, avoidWrap);
+        widget.changeActive(widget.data.selectedHint + n, avoidWrap);
       },
       setFocus: function (n) {
         widget.changeActive(n);
@@ -298,6 +301,7 @@
         completion.close();
       },
       pick: function () {
+        console.log('PICK 2');
         widget.pick();
       },
       data: data
@@ -333,13 +337,6 @@
       hints.style.left = (left + startScroll.left - curScroll.left) + "px";
     });
 
-    if (data.depth && data.depth > 1) {
-      this.childWidget = new ChildWidget(this);
-      if (data.list.length > 0 && data.list[this.selectedHint].children) {
-        this.childWidget.show(data.list[0].children);
-      }
-    }
-
     CodeMirror.on(hints, "dblclick", function (e) {
       var t = getHintElement(hints, e.target || e.srcElement);
       if (t && t.hintId != null) {
@@ -364,14 +361,13 @@
       }, 20);
     });
 
-    /*
     if (completion.options.completeOnSingleClick)
       CodeMirror.on(hints, "mousemove", function (e) {
         console.log('mousemove');
         var elt = getHintElement(hints, e.target || e.srcElement);
         if (elt && elt.hintId != null)
           widget.changeActive(elt.hintId);
-      });*/
+      });
 
     CodeMirror.signal(data, "select", completions[0], hints.firstChild);
     return true;
@@ -380,9 +376,6 @@
   Widget.prototype = {
     close: function () {
       console.log('close');
-      //if (this.childWidget) {
-      //  this.childWidget.close();
-      //}
       if (this.completion.widget != this) return;
       this.completion.widget = null;
       this.container.parentNode.removeChild(this.container);
@@ -408,8 +401,35 @@
       this.completion.cm.addKeyMap(this.keyMap);
     },
 
+    renderChildren: function (data) {
+      this.depth = this.depth + 1;
+      this.data = data;
+      this.data.selectedHint = data.selectedHint || 0;
+      // remove any previous member
+      while (this.hints.firstChild) {
+        this.hints.removeChild(this.hints.firstChild);
+      }
+      // rebuild the list
+      for (var i = 0; i < data.list.length; ++i) {
+        var elt = this.hints.appendChild(document.createElement("li")), cur = data.list[i];
+        var className = HINT_ELEMENT_CLASS + (i != this.data.selectedHint ? "" : " " + ACTIVE_HINT_ELEMENT_CLASS);
+        if (cur.className != null) className = cur.className + " " + className;
+        elt.className = className;
+        if (cur.render) cur.render(elt, data, cur);
+        else elt.appendChild(document.createTextNode(cur.displayText || getText(cur)));
+        elt.hintId = i;
+      }
+    },
+
     pick: function () {
-      this.completion.pick(this.data, this.selectedHint);
+      console.log('PICK 3');
+      if (this.data.list[this.data.selectedHint].children) {
+        console.log('PICK 3.1');
+        this.renderChildren(this.data.list[this.data.selectedHint].children);
+      } else {
+        console.log('PICK 3.2');
+        this.completion.pick(this.rootData);
+      }
     },
 
     changeActive: function (i, avoidWrap) {
@@ -418,24 +438,16 @@
         i = avoidWrap ? this.data.list.length - 1 : 0;
       else if (i < 0)
         i = avoidWrap ? 0 : this.data.list.length - 1;
-      if (this.selectedHint == i) return;
-      var node = this.hints.childNodes[this.selectedHint];
+      if (this.data.selectedHint == i) return;
+      var node = this.hints.childNodes[this.data.selectedHint];
       node.className = node.className.replace(" " + ACTIVE_HINT_ELEMENT_CLASS, "");
-      node = this.hints.childNodes[this.selectedHint = i];
+      node = this.hints.childNodes[this.data.selectedHint = i];
       node.className += " " + ACTIVE_HINT_ELEMENT_CLASS;
       if (node.offsetTop < this.hints.scrollTop)
         this.hints.scrollTop = node.offsetTop - 3;
       else if (node.offsetTop + node.offsetHeight > this.hints.scrollTop + this.hints.clientHeight)
         this.hints.scrollTop = node.offsetTop + node.offsetHeight - this.hints.clientHeight + 3;
-
-      if (this.childWidget) {
-        if (this.data.list[this.selectedHint].children) {
-          this.childWidget.show(this.data.list[this.selectedHint].children);
-        } else {
-          this.childWidget.hide();
-        }
-      }
-      CodeMirror.signal(this.data, "select", this.data.list[this.selectedHint], node);
+      CodeMirror.signal(this.data, "select", this.data.list[this.data.selectedHint], node);
     },
 
     screenAmount: function () {
@@ -502,79 +514,6 @@
       }
     }
   }
-
-  function ChildWidget(parent) {
-    this.parent = parent;
-    var widget = this;
-    var hints = this.hints = document.createElement("ul");
-    hints.className = "CodeMirror-hints";
-
-    var left = parent.left + parent.hints.offsetWidth;
-    var top = parent.top;
-    hints.style.left = left + "px";
-    hints.style.top = top + "px";
-
-    parent.container.appendChild(hints);
-
-    CodeMirror.on(hints, "click", function (e) {
-      console.log('child click');
-      widget.parent.childClickedAt = Date.now();
-      var t = getHintElement(hints, e.target || e.srcElement);
-      if (t && t.hintId != null) {
-        widget.changeActive(t.hintId);
-      }
-    });
-  }
-
-  ChildWidget.prototype = {
-
-    hide: function () {
-      this.hints.style.display = 'none';
-    },
-
-    show: function (data) {
-      // initialize the hint list
-      this.data = data;
-      this.data.selectedHint = data.selectedHint || 0;
-      // remove any previous member
-      while (this.hints.firstChild) {
-        this.hints.removeChild(this.hints.firstChild);
-      }
-      // rebuild the list
-      for (var i = 0; i < data.list.length; ++i) {
-        var elt = this.hints.appendChild(document.createElement("li")), cur = data.list[i];
-        var className = HINT_ELEMENT_CLASS + (i != this.data.selectedHint ? "" : " " + ACTIVE_HINT_ELEMENT_CLASS);
-        if (cur.className != null) className = cur.className + " " + className;
-        elt.className = className;
-        if (cur.render) cur.render(elt, data, cur);
-        else elt.appendChild(document.createTextNode(cur.displayText || getText(cur)));
-        elt.hintId = i;
-      }
-      this.hints.style.display = 'block';
-    },
-
-    changeActive: function (i, avoidWrap) {
-      console.log('child changeActive', this.data.selectedHint);
-      if (i >= this.data.list.length) {
-        i = avoidWrap ? this.data.list.length - 1 : 0;
-      } else if (i < 0) {
-        i = avoidWrap ? 0 : this.data.list.length - 1;
-      }
-      if (this.data.selectedHint == i) {
-        return;
-      }
-      console.log('CHANGED child', this);
-      var node = this.hints.childNodes[this.data.selectedHint];
-      node.className = node.className.replace(" " + ACTIVE_HINT_ELEMENT_CLASS, "");
-      node = this.hints.childNodes[this.data.selectedHint = i];
-      node.className += " " + ACTIVE_HINT_ELEMENT_CLASS;
-      if (node.offsetTop < this.hints.scrollTop) {
-        this.hints.scrollTop = node.offsetTop - 3;
-      } else if (node.offsetTop + node.offsetHeight > this.hints.scrollTop + this.hints.clientHeight) {
-        this.hints.scrollTop = node.offsetTop + node.offsetHeight - this.hints.clientHeight + 3;
-      }
-    }
-  };
 
   CodeMirror.registerHelper("hint", "auto", {
     resolve: resolveAutoHints
