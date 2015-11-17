@@ -11,6 +11,10 @@
 })(function (CodeMirror) {
   "use strict";
 
+  if (!Date.now) {
+    Date.now = function() { return new Date().getTime(); }
+  }
+
   var HINT_ELEMENT_CLASS = "CodeMirror-hint";
   var ACTIVE_HINT_ELEMENT_CLASS = "CodeMirror-hint-active";
 
@@ -216,68 +220,16 @@
     }
   }
 
-  function Widget(completion, data, parent) {
-
-    var left;
-    var top;
-    var below = true;
-
-    function placeWidget() {
-      console.log('placeWidget');
-      if (parent) {
-        console.log('parents width', parent.hints.offsetWidth);
-        left = parent.left + parent.hints.offsetWidth;
-        top = parent.top;
-        below = true;
-        hints.style.left = left + "px";
-        hints.style.top = top + "px";
-        (completion.options.container || document.body).appendChild(hints);
-      } else {
-        var pos = cm.cursorCoords(completion.options.alignWithWord ? data.from : null);
-        left = pos.left;
-        top = pos.bottom;
-        below = true;
-        hints.style.left = left + "px";
-        hints.style.top = top + "px";
-        // If we're at the edge of the screen, then we want the menu to appear on the left of the cursor.
-        var winW = window.innerWidth || Math.max(document.body.offsetWidth, document.documentElement.offsetWidth);
-        var winH = window.innerHeight || Math.max(document.body.offsetHeight, document.documentElement.offsetHeight);
-        (completion.options.container || document.body).appendChild(hints);
-        var box = hints.getBoundingClientRect(), overlapY = box.bottom - winH;
-        if (overlapY > 0) {
-          var height = box.bottom - box.top, curTop = pos.top - (pos.bottom - box.top);
-          if (curTop - height > 0) { // Fits above cursor
-            hints.style.top = (top = pos.top - height) + "px";
-            below = false;
-          } else if (height > winH) {
-            hints.style.height = (winH - 5) + "px";
-            hints.style.top = (top = pos.bottom - box.top) + "px";
-            var cursor = cm.getCursor();
-            if (data.from.ch != cursor.ch) {
-              pos = cm.cursorCoords(cursor);
-              hints.style.left = (left = pos.left) + "px";
-              box = hints.getBoundingClientRect();
-            }
-          }
-        }
-        var overlapX = box.right - winW;
-        if (overlapX > 0) {
-          if (box.right - box.left > winW) {
-            hints.style.width = (winW - 5) + "px";
-            overlapX -= (box.right - box.left) - winW;
-          }
-          hints.style.left = (left = pos.left - overlapX) + "px";
-        }
-      }
-    }
-
-    console.log('CREATE WIDGET', completion, data, parent);
+  function Widget(completion, data) {
     this.completion = completion;
     this.data = data;
     this.picked = false;
     var widget = this, cm = completion.cm;
 
+    var container = document.createElement("div");
+    this.container = container;
     var hints = this.hints = document.createElement("ul");
+    container.appendChild(hints);
     hints.className = "CodeMirror-hints";
     this.selectedHint = data.selectedHint || 0;
 
@@ -292,7 +244,40 @@
       elt.hintId = i;
     }
 
-    placeWidget();
+    var pos = cm.cursorCoords(completion.options.alignWithWord ? data.from : null);
+    var left = pos.left, top = pos.bottom, below = true;
+    hints.style.left = left + "px";
+    hints.style.top = top + "px";
+    // If we're at the edge of the screen, then we want the menu to appear on the left of the cursor.
+    var winW = window.innerWidth || Math.max(document.body.offsetWidth, document.documentElement.offsetWidth);
+    var winH = window.innerHeight || Math.max(document.body.offsetHeight, document.documentElement.offsetHeight);
+    (completion.options.container || document.body).appendChild(container);
+    var box = hints.getBoundingClientRect(), overlapY = box.bottom - winH;
+    if (overlapY > 0) {
+      var height = box.bottom - box.top, curTop = pos.top - (pos.bottom - box.top);
+      if (curTop - height > 0) { // Fits above cursor
+        hints.style.top = (top = pos.top - height) + "px";
+        below = false;
+      } else if (height > winH) {
+        hints.style.height = (winH - 5) + "px";
+        hints.style.top = (top = pos.bottom - box.top) + "px";
+        var cursor = cm.getCursor();
+        if (data.from.ch != cursor.ch) {
+          pos = cm.cursorCoords(cursor);
+          hints.style.left = (left = pos.left) + "px";
+          box = hints.getBoundingClientRect();
+        }
+      }
+    }
+    var overlapX = box.right - winW;
+    if (overlapX > 0) {
+      if (box.right - box.left > winW) {
+        hints.style.width = (winW - 5) + "px";
+        overlapX -= (box.right - box.left) - winW;
+      }
+      hints.style.left = (left = pos.left - overlapX) + "px";
+    }
+
     this.left = left;
     this.top = top;
 
@@ -317,13 +302,20 @@
     }));
 
     if (completion.options.closeOnUnfocus) {
+      console.log('BLUR', completion.options);
       var closingOnBlur;
-      cm.on("blur", this.onBlur = function () {
+      cm.on("blur", this.onBlur = function (a, b, c) {
+        console.log('blur', this, a, b, c);
         closingOnBlur = setTimeout(function () {
-          completion.close();
+          console.log('should we close?', Date.now, widget.childClickedAt);
+          //if (!widget.childClickedAt || Date.now - widget.childClickedAt > 150) {
+            console.log('CLOSE');
+            completion.close();
+          //}
         }, 100);
       });
       cm.on("focus", this.onFocus = function () {
+        console.log('focus');
         clearTimeout(closingOnBlur);
       });
     }
@@ -339,6 +331,12 @@
       hints.style.left = (left + startScroll.left - curScroll.left) + "px";
     });
 
+    console.log('WIDGET data', data);
+    if (data.depth && data.depth > 1) {
+      // FIXME
+      this.childWidget = new ChildWidget(this, data.list[0].children);
+    }
+
     CodeMirror.on(hints, "dblclick", function (e) {
       var t = getHintElement(hints, e.target || e.srcElement);
       if (t && t.hintId != null) {
@@ -348,6 +346,7 @@
     });
 
     CodeMirror.on(hints, "click", function (e) {
+      console.log('click');
       var t = getHintElement(hints, e.target || e.srcElement);
       if (t && t.hintId != null) {
         widget.changeActive(t.hintId);
@@ -356,6 +355,7 @@
     });
 
     CodeMirror.on(hints, "mousedown", function () {
+      console.log('mousedown');
       setTimeout(function () {
         cm.focus();
       }, 20);
@@ -363,25 +363,25 @@
 
     if (completion.options.completeOnSingleClick)
       CodeMirror.on(hints, "mousemove", function (e) {
+        console.log('mousemove');
         var elt = getHintElement(hints, e.target || e.srcElement);
         if (elt && elt.hintId != null)
           widget.changeActive(elt.hintId);
       });
 
-    if (completions[0].childList) {
-      console.log('============= Build child list', completions[0].childList);
-      this.childWidget = new Widget(completion, {list: completions[0].childList, from: data.from, to: data.to}, this);
-    }
     CodeMirror.signal(data, "select", completions[0], hints.firstChild);
-
     return true;
   }
 
   Widget.prototype = {
     close: function () {
+      console.log('close');
+      //if (this.childWidget) {
+      //  this.childWidget.close();
+      //}
       if (this.completion.widget != this) return;
       this.completion.widget = null;
-      this.hints.parentNode.removeChild(this.hints);
+      this.container.parentNode.removeChild(this.container);
       this.completion.cm.removeKeyMap(this.keyMap);
 
       var cm = this.completion.cm;
@@ -393,6 +393,7 @@
     },
 
     disable: function () {
+      console.log('disable');
       this.completion.cm.removeKeyMap(this.keyMap);
       var widget = this;
       this.keyMap = {
@@ -404,10 +405,12 @@
     },
 
     pick: function () {
+      console.log('pick');
       this.completion.pick(this.data, this.selectedHint);
     },
 
     changeActive: function (i, avoidWrap) {
+      console.log('changeActive');
       if (i >= this.data.list.length)
         i = avoidWrap ? this.data.list.length - 1 : 0;
       else if (i < 0)
@@ -488,6 +491,65 @@
       }
     }
   }
+
+  function ChildWidget(parent, data) {
+    this.data = data;
+    this.parent = parent;
+    var widget = this;
+    var hints = this.hints = document.createElement("ul");
+    hints.className = "CodeMirror-hints";
+    this.selectedHint = data.selectedHint || 0;
+
+    var completions = data.list;
+    for (var i = 0; i < completions.length; ++i) {
+      var elt = hints.appendChild(document.createElement("li")), cur = completions[i];
+      var className = HINT_ELEMENT_CLASS + (i != this.selectedHint ? "" : " " + ACTIVE_HINT_ELEMENT_CLASS);
+      if (cur.className != null) className = cur.className + " " + className;
+      elt.className = className;
+      if (cur.render) cur.render(elt, data, cur);
+      else elt.appendChild(document.createTextNode(cur.displayText || getText(cur)));
+      elt.hintId = i;
+    }
+
+    var left = parent.left + parent.hints.offsetWidth;
+    var top = parent.top;
+    hints.style.left = left + "px";
+    hints.style.top = top + "px";
+
+    parent.container.appendChild(hints);
+
+    CodeMirror.on(hints, "click", function (e) {
+      console.log('child click');
+      widget.parent.childClickedAt = Date.now;
+      var t = getHintElement(hints, e.target || e.srcElement);
+      if (t && t.hintId != null) {
+        widget.changeActive(t.hintId);
+      }
+    });
+  }
+
+  ChildWidget.prototype = {
+    changeActive: function (i, avoidWrap) {
+      console.log('child changeActive');
+      if (i >= this.data.list.length) {
+        i = avoidWrap ? this.data.list.length - 1 : 0;
+      } else if (i < 0) {
+        i = avoidWrap ? 0 : this.data.list.length - 1;
+      }
+      if (this.selectedHint == i) {
+        return;
+      }
+      var node = this.hints.childNodes[this.selectedHint];
+      node.className = node.className.replace(" " + ACTIVE_HINT_ELEMENT_CLASS, "");
+      node = this.hints.childNodes[this.selectedHint = i];
+      node.className += " " + ACTIVE_HINT_ELEMENT_CLASS;
+      if (node.offsetTop < this.hints.scrollTop) {
+        this.hints.scrollTop = node.offsetTop - 3;
+      } else if (node.offsetTop + node.offsetHeight > this.hints.scrollTop + this.hints.clientHeight) {
+        this.hints.scrollTop = node.offsetTop + node.offsetHeight - this.hints.clientHeight + 3;
+      }
+    }
+  };
 
   CodeMirror.registerHelper("hint", "auto", {
     resolve: resolveAutoHints
