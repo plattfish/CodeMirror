@@ -89,7 +89,6 @@
     },
 
     pick: function (data) {
-      console.log('PICK 1');
       var completion = data.list[data.selectedHint];
       if (completion.hint) completion.hint(this.cm, data, completion);
       else this.cm.replaceRange(getText(completion), completion.from || data.from,
@@ -301,27 +300,21 @@
         completion.close();
       },
       pick: function () {
-        console.log('PICK 2');
         widget.pick();
       },
       data: data
     }));
 
     if (completion.options.closeOnUnfocus) {
-      console.log('BLUR', completion.options);
       var closingOnBlur;
       cm.on("blur", this.onBlur = function (a, b, c) {
-        console.log('blur', this, a, b, c);
         closingOnBlur = setTimeout(function () {
-          console.log('should we close?', widget, Date.now(), widget.childClickedAt);
           if (!widget.childClickedAt || Date.now() - widget.childClickedAt > 150) {
-            console.log('CLOSE');
             completion.close();
           }
         }, 100);
       });
       cm.on("focus", this.onFocus = function () {
-        console.log('focus');
         clearTimeout(closingOnBlur);
       });
     }
@@ -346,7 +339,6 @@
     });
 
     CodeMirror.on(hints, "click", function (e) {
-      console.log('click');
       var t = getHintElement(hints, e.target || e.srcElement);
       if (t && t.hintId != null) {
         widget.changeActive(t.hintId);
@@ -355,7 +347,6 @@
     });
 
     CodeMirror.on(hints, "mousedown", function () {
-      console.log('mousedown');
       setTimeout(function () {
         cm.focus();
       }, 20);
@@ -363,7 +354,6 @@
 
     if (completion.options.completeOnSingleClick)
       CodeMirror.on(hints, "mousemove", function (e) {
-        console.log('mousemove');
         var elt = getHintElement(hints, e.target || e.srcElement);
         if (elt && elt.hintId != null)
           widget.changeActive(elt.hintId);
@@ -375,7 +365,6 @@
 
   Widget.prototype = {
     close: function () {
-      console.log('close');
       if (this.completion.widget != this) return;
       this.completion.widget = null;
       this.container.parentNode.removeChild(this.container);
@@ -390,7 +379,6 @@
     },
 
     disable: function () {
-      console.log('disable');
       this.completion.cm.removeKeyMap(this.keyMap);
       var widget = this;
       this.keyMap = {
@@ -422,18 +410,14 @@
     },
 
     pick: function () {
-      console.log('PICK 3');
       if (this.data.list[this.data.selectedHint].children) {
-        console.log('PICK 3.1');
         this.renderChildren(this.data.list[this.data.selectedHint].children);
       } else {
-        console.log('PICK 3.2');
         this.completion.pick(this.rootData);
       }
     },
 
     changeActive: function (i, avoidWrap) {
-      console.log('changeActive');
       if (i >= this.data.list.length)
         i = avoidWrap ? this.data.list.length - 1 : 0;
       else if (i < 0)
